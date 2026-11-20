@@ -33,13 +33,14 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -56,6 +57,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -87,12 +89,14 @@ import java.text.DateFormat
 import java.util.Date
 
 // ============================================================
-// थीम
+// THEME
 // ============================================================
 val Bg = Color(0xFF0B0D12)
 val Surface1 = Color(0xFF151923)
+val Surface2 = Color(0xFF1E2430)
 val Accent = Color(0xFF7C5CFF)
 val Accent2 = Color(0xFF22D3EE)
+val Muted = Color(0xFF9AA3B2)
 
 private val DarkScheme = darkColorScheme(
     primary = Accent, secondary = Accent2,
@@ -105,7 +109,7 @@ fun PrakashTheme(content: @Composable () -> Unit) =
     MaterialTheme(colorScheme = DarkScheme, content = content)
 
 // ============================================================
-// डेटाबेस (Room): प्रोजेक्ट सुरक्षित सेव
+// DATABASE (Room)
 // ============================================================
 @Entity
 data class Project(
@@ -137,7 +141,7 @@ abstract class AppDb : RoomDatabase() {
 }
 
 // ============================================================
-// गैलरी में सेव और शेयर
+// SAVE TO GALLERY AND SHARE
 // ============================================================
 object SaveShare {
     fun exportsDir(ctx: Context): File =
@@ -154,7 +158,7 @@ object SaveShare {
         }
         val resolver = ctx.contentResolver
         val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
-            ?: error("गैलरी में फ़ाइल नहीं बन सकी")
+            ?: error("Could not create file in gallery")
         resolver.openOutputStream(uri)!!.use { out -> file.inputStream().use { it.copyTo(out) } }
         if (Build.VERSION.SDK_INT >= 29) {
             values.clear(); values.put(MediaStore.Video.Media.IS_PENDING, 0)
@@ -170,19 +174,24 @@ object SaveShare {
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        ctx.startActivity(Intent.createChooser(i, "शेयर करें").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        ctx.startActivity(Intent.createChooser(i, "Share").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 }
 
 // ============================================================
-// वीडियो इंजन (Media3): ट्रिम, स्पीड, चमक, फ़िल्टर, फ़ॉर्मेट, क्वालिटी
+// VIDEO ENGINE (Media3)
 // ============================================================
-enum class Filter(val label: String) { NONE("कोई नहीं"), BW("ब्लैक एंड व्हाइट"), WARM("गर्म"), COOL("ठंडा") }
+enum class Filter(val label: String, val c1: Color, val c2: Color) {
+    NONE("None", Color(0xFF475569), Color(0xFF64748B)),
+    BW("B&W", Color(0xFF111827), Color(0xFF9CA3AF)),
+    WARM("Warm", Color(0xFFF97316), Color(0xFFFBBF24)),
+    COOL("Cool", Color(0xFF3B82F6), Color(0xFF22D3EE))
+}
 enum class OutQuality(val label: String, val height: Int) {
     Q720("720p", 720), Q1080("1080p", 1080), Q4K("4K", 2160)
 }
 enum class Target(val label: String, val vertical: Boolean?) {
-    ORIGINAL("मूल", null), SHORTS("YouTube Shorts 9:16", true),
+    ORIGINAL("Original", null), SHORTS("YouTube Shorts 9:16", true),
     REELS("Instagram Reels 9:16", true), FACEBOOK("Facebook 16:9", false)
 }
 
@@ -222,8 +231,8 @@ class VideoEngine(private val ctx: Context) {
             override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
                 transformer = null
                 val hint = if (quality == OutQuality.Q4K)
-                    " (आपका फ़ोन शायद 4K सपोर्ट नहीं करता, 1080p चुनें)" else ""
-                onError("एक्सपोर्ट विफल: ${exportException.errorCodeName}$hint")
+                    " (your phone may not support 4K, try 1080p)" else ""
+                onError("Export failed: ${exportException.errorCodeName}$hint")
             }
         }
 
@@ -274,7 +283,7 @@ class VideoEngine(private val ctx: Context) {
         clips: List<Uri>, music: Uri?, vertical: Boolean, clipSeconds: Int,
         onProgress: (Int) -> Unit, onDone: (File) -> Unit, onError: (String) -> Unit
     ) {
-        if (clips.size < 2) { onError("कम से कम 2 क्लिप चुनें (5 या ज़्यादा बेहतर है)"); return }
+        if (clips.size < 2) { onError("Select at least 2 clips (5 or more is better)"); return }
         val out = File(SaveShare.exportsDir(ctx), "PrakashAI_combo_${System.currentTimeMillis()}.mp4")
         val aspect = if (vertical) 9f / 16f else 16f / 9f
         val items = clips.map { uri ->
@@ -319,7 +328,7 @@ fun videoDurationMs(ctx: Context, uri: Uri): Long {
 }
 
 // ============================================================
-// मुख्य Activity और नेविगेशन
+// MAIN ACTIVITY AND NAVIGATION
 // ============================================================
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -331,6 +340,19 @@ class MainActivity : ComponentActivity() {
 val pages = listOf(
     "Home", "AI Studio", "Movie Editor", "AI Shorts Maker",
     "Camera Studio", "Video Editor", "My Projects", "Gallery", "Settings"
+)
+
+// Preset chosen on the Home screen, picked up by the Video Editor
+var pendingTarget: Target? = null
+
+data class NavItem(val label: String, val route: String, val icon: ImageVector)
+
+val bottomNav = listOf(
+    NavItem("Home", "Home", Icons.Default.Home),
+    NavItem("Studio", "AI Studio", Icons.Default.AutoAwesome),
+    NavItem("Camera", "Camera Studio", Icons.Default.Videocam),
+    NavItem("Projects", "My Projects", Icons.Default.Folder),
+    NavItem("Settings", "Settings", Icons.Default.Settings)
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -360,6 +382,18 @@ fun App() {
                         }
                     }
                 )
+            },
+            bottomBar = {
+                NavigationBar(containerColor = Surface1) {
+                    bottomNav.forEach { n ->
+                        NavigationBarItem(
+                            selected = page == n.route,
+                            onClick = { page = n.route },
+                            icon = { Icon(n.icon, null) },
+                            label = { Text(n.label, fontSize = 11.sp) }
+                        )
+                    }
+                }
             }
         ) { pad ->
             Box(Modifier.padding(pad).fillMaxSize()) {
@@ -380,402 +414,135 @@ fun App() {
 }
 
 // ============================================================
-// होम पेज
+// HOME PAGE
 // ============================================================
-data class Feature(val title: String, val sub: String, val icon: ImageVector, val route: String)
+data class Feature(
+    val title: String, val sub: String, val icon: ImageVector,
+    val route: String, val c1: Color, val c2: Color
+)
 
 val features = listOf(
-    Feature("AI Studio", "कई क्लिप जोड़ें", Icons.Default.AutoAwesome, "AI Studio"),
-    Feature("Movie Editor", "लंबी फ़िल्म", Icons.Default.Movie, "Movie Editor"),
-    Feature("AI Shorts", "लंबा वीडियो → Shorts", Icons.Default.ContentCut, "AI Shorts Maker"),
-    Feature("Camera Studio", "सीधे रिकॉर्ड करें", Icons.Default.Videocam, "Camera Studio"),
-    Feature("Video Editor", "ट्रिम, स्पीड, फ़िल्टर", Icons.Default.Edit, "Video Editor"),
-    Feature("My Projects", "सेव किए प्रोजेक्ट", Icons.Default.Folder, "My Projects"),
-    Feature("Gallery", "एक्सपोर्ट किए वीडियो", Icons.Default.PhotoLibrary, "Gallery"),
-    Feature("Settings", "सेटिंग्स", Icons.Default.Settings, "Settings"),
+    Feature("AI Studio", "Combine clips", Icons.Default.AutoAwesome, "AI Studio", Color(0xFF7C5CFF), Color(0xFFB794F6)),
+    Feature("Movie Editor", "Long movies", Icons.Default.Movie, "Movie Editor", Color(0xFFEC4899), Color(0xFFF472B6)),
+    Feature("AI Shorts", "Long video to Shorts", Icons.Default.ContentCut, "AI Shorts Maker", Color(0xFFF59E0B), Color(0xFFFBBF24)),
+    Feature("Camera Studio", "Record videos", Icons.Default.Videocam, "Camera Studio", Color(0xFF10B981), Color(0xFF34D399)),
+    Feature("Video Editor", "Trim, speed, filters", Icons.Default.Edit, "Video Editor", Color(0xFF3B82F6), Color(0xFF60A5FA)),
+    Feature("Gallery", "Exported videos", Icons.Default.PhotoLibrary, "Gallery", Color(0xFF06B6D4), Color(0xFF22D3EE)),
 )
 
 @Composable
 fun HomePage(go: (String) -> Unit) {
-    Column(Modifier.fillMaxSize().background(Bg).padding(16.dp)) {
-        Box(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
-                .background(Brush.linearGradient(listOf(Accent, Accent2))).padding(24.dp)
-        ) {
-            Column {
-                Text("Prakash AI Studio", style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold, color = Color.White)
-                Text("वीडियो बनाएँ, एडिट करें, शेयर करें", color = Color.White)
-            }
-        }
-        Spacer(Modifier.height(16.dp))
-        LazyVerticalGrid(
-            GridCells.Fixed(2),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            items(features.size) { i ->
-                var shown by remember { mutableStateOf(false) }
-                LaunchedEffect(Unit) { kotlinx.coroutines.delay(i * 70L); shown = true }
-                AnimatedVisibility(shown, enter = fadeIn() + slideInVertically { it / 2 }) {
-                    val f = features[i]
-                    Column(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
-                            .background(Surface1).clickable { go(f.route) }.padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(f.icon, null, tint = Accent2)
-                        Text(f.title, fontWeight = FontWeight.SemiBold)
-                        Text(f.sub, style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ============================================================
-// वीडियो एडिटर पेज
-// ============================================================
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
-@Composable
-fun ProEditorPage() {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var uri by remember { mutableStateOf<Uri?>(null) }
-    var durSec by remember { mutableStateOf(0f) }
-    var range by remember { mutableStateOf(0f..1f) }
-    var speed by remember { mutableStateOf(1f) }
-    var bright by remember { mutableStateOf(0f) }
-    var contrast by remember { mutableStateOf(0f) }
-    var sat by remember { mutableStateOf(0f) }
-    var filter by remember { mutableStateOf(Filter.NONE) }
-    var quality by remember { mutableStateOf(OutQuality.Q1080) }
-    var target by remember { mutableStateOf(Target.ORIGINAL) }
-    var progress by remember { mutableStateOf(-1) }
-    var status by remember { mutableStateOf("") }
-    var last by remember { mutableStateOf<File?>(null) }
-    val engine = remember { VideoEngine(ctx) }
-
-    val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u ->
-        uri = u
-        if (u != null) {
-            durSec = videoDurationMs(ctx, u) / 1000f
-            range = 0f..durSec
-        }
-    }
-
-    Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Button(onClick = { pick.launch(PickVisualMediaRequest(
-            ActivityResultContracts.PickVisualMedia.VideoOnly)) }) { Text("वीडियो चुनें") }
-        if (uri != null && durSec > 0f) {
-            Text("ट्रिम: ${range.start.toInt()}s से ${range.endInclusive.toInt()}s (कुल ${durSec.toInt()}s)")
-            RangeSlider(range, { range = it }, valueRange = 0f..durSec)
-            Text("स्पीड: ${"%.2f".format(speed)}x"); Slider(speed, { speed = it }, valueRange = 0.25f..4f)
-            Text("चमक"); Slider(bright, { bright = it }, valueRange = -1f..1f)
-            Text("कॉन्ट्रास्ट"); Slider(contrast, { contrast = it }, valueRange = -1f..1f)
-            Text("रंग की गहराई"); Slider(sat, { sat = it }, valueRange = -100f..100f)
-            Text("फ़िल्टर")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Filter.values().forEach { f -> FilterChip(filter == f, { filter = f }, { Text(f.label) }) }
-            }
-            Text("फ़ॉर्मेट")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Target.values().forEach { t -> FilterChip(target == t, { target = t }, { Text(t.label) }) }
-            }
-            Text("क्वालिटी")
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutQuality.values().forEach { q -> FilterChip(quality == q, { quality = q }, { Text(q.label) }) }
-            }
-            Button(enabled = progress < 0, onClick = {
-                if (range.endInclusive - range.start < 1f) {
-                    status = "त्रुटि: ट्रिम कम से कम 1 सेकंड का रखें"; return@Button
-                }
-                progress = 0; status = "प्रोसेसिंग..."; last = null
-                val s = EditSettings((range.start * 1000).toLong(), (range.endInclusive * 1000).toLong(),
-                    speed, bright, contrast, sat, filter, quality, target)
-                engine.export(uri!!, s,
-                    onProgress = { progress = it },
-                    onDone = { f ->
-                        progress = -1; status = "तैयार: ${f.name}"; last = f
-                        scope.launch(Dispatchers.IO) {
-                            AppDb.get(ctx).projects().insert(
-                                Project(name = f.name, sourceUri = uri.toString(), outputUri = f.absolutePath))
-                        }
-                    },
-                    onError = { progress = -1; status = it })
-            }) { Text("एक्सपोर्ट करें") }
-            if (progress >= 0) {
-                LinearProgressIndicator(progress / 100f, Modifier.fillMaxWidth()); Text("$progress%")
-                TextButton(onClick = { engine.cancel(); progress = -1; status = "रद्द किया" }) { Text("रद्द करें") }
-            }
-            Text(status)
-            last?.let { f ->
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { status = SaveShare.saveToGallery(ctx, f).fold(
-                        { "गैलरी में सेव हो गया" }, { "सेव नहीं हुआ: ${it.message}" }) }) { Text("गैलरी में सेव") }
-                    OutlinedButton(onClick = { SaveShare.share(ctx, f) }) { Text("शेयर") }
-                }
-            }
-        }
-    }
-}
-
-// ============================================================
-// AI Studio: कई क्लिप जोड़कर एक वीडियो
-// ============================================================
-@Composable
-fun MultiCamPage() {
-    val ctx = LocalContext.current
-    var clips by remember { mutableStateOf<List<Uri>>(emptyList()) }
-    var music by remember { mutableStateOf<Uri?>(null) }
-    var vertical by remember { mutableStateOf(true) }
-    var seconds by remember { mutableStateOf(4f) }
-    var progress by remember { mutableStateOf(-1) }
-    var status by remember { mutableStateOf("") }
-    var last by remember { mutableStateOf<File?>(null) }
-    val engine = remember { VideoEngine(ctx) }
-
-    val pickClips = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickMultipleVisualMedia(10)) { clips = it }
-    val pickMusic = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()) { music = it }
-
-    Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("चुनी हुई क्लिप एक के बाद एक जुड़ती हैं, हर क्लिप से तय सेकंड लिए जाते हैं। यह स्मार्ट चुनाव नहीं है, और ट्रांज़िशन अभी नहीं हैं।",
-            style = MaterialTheme.typography.bodySmall)
-        Button(onClick = { pickClips.launch(PickVisualMediaRequest(
-            ActivityResultContracts.PickVisualMedia.VideoOnly)) }) { Text("क्लिप चुनें (5+ बेहतर)") }
-        Text("चुनी गई क्लिप: ${clips.size}")
-        OutlinedButton(onClick = { pickMusic.launch(arrayOf("audio/*")) }) {
-            Text(if (music == null) "बैकग्राउंड म्यूज़िक चुनें (वैकल्पिक)" else "म्यूज़िक चुना गया") }
-        Text("हर क्लिप से: ${seconds.toInt()} सेकंड")
-        Slider(seconds, { seconds = it }, valueRange = 2f..10f, steps = 7)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(vertical, { vertical = it }); Text("  9:16 वर्टिकल")
-        }
-        Button(enabled = clips.size >= 2 && progress < 0, onClick = {
-            progress = 0; status = "वीडियो बन रहा है..."; last = null
-            engine.combine(clips, music, vertical, seconds.toInt(),
-                onProgress = { progress = it },
-                onDone = { progress = -1; status = "तैयार: ${it.name}"; last = it },
-                onError = { progress = -1; status = it })
-        }) { Text("वीडियो बनाएँ") }
-        if (progress >= 0) {
-            LinearProgressIndicator(progress / 100f, Modifier.fillMaxWidth()); Text("$progress%")
-            TextButton(onClick = { engine.cancel(); progress = -1; status = "रद्द किया" }) { Text("रद्द करें") }
-        }
-        Text(status)
-        last?.let { f ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { status = SaveShare.saveToGallery(ctx, f).fold(
-                    { "गैलरी में सेव हो गया" }, { "सेव नहीं हुआ: ${it.message}" }) }) { Text("गैलरी में सेव") }
-                OutlinedButton(onClick = { SaveShare.share(ctx, f) }) { Text("शेयर") }
-            }
-        }
-    }
-}
-
-// ============================================================
-// Shorts / Movie Editor: अभी सिर्फ़ ईमानदार सूचना
-// (पूरा फ़ीचर अगले चरण में जुड़ेगा)
-// ============================================================
-@Composable
-fun ShortsInfoPage() {
-    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("यह फ़ीचर इस संस्करण में अभी जुड़ा नहीं है।", style = MaterialTheme.typography.titleMedium)
-        Text("लंबे वीडियो से Shorts बनाने के लिए अभी Video Editor में ट्रिम और 'YouTube Shorts 9:16' फ़ॉर्मेट इस्तेमाल करें।")
-        Text("आवाज़ की ऊर्जा से सबसे अच्छे हिस्से ढूँढने वाला कोड अगले चरण में जोड़ा जाएगा। सीन का अर्थ समझकर चुनाव के लिए बाहरी AI सेवा चाहिए।")
-    }
-}
-
-// ============================================================
-// कैमरा स्टूडियो (CameraX)
-// ============================================================
-@Composable
-fun CameraStudioPage() {
-    val ctx = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var hasPerm by remember {
-        mutableStateOf(listOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO).all {
-            ContextCompat.checkSelfPermission(ctx, it) == PackageManager.PERMISSION_GRANTED })
-    }
-    val permLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()) { r -> hasPerm = r.values.all { it } }
-
-    if (!hasPerm) {
-        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("कैमरा और माइक्रोफ़ोन की अनुमति चाहिए")
-            Button(onClick = { permLauncher.launch(arrayOf(
-                Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)) }) { Text("अनुमति दें") }
-        }
-        return
-    }
-
-    var front by remember { mutableStateOf(false) }
-    var quality by remember { mutableStateOf(CamQuality.FHD) }
-    var recording by remember { mutableStateOf<Recording?>(null) }
-    var clipCount by remember { mutableStateOf(0) }
-    var msg by remember { mutableStateOf("") }
-    var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
-    val previewView = remember { PreviewView(ctx) }
-
-    LaunchedEffect(front, quality) {
-        try {
-            val provider = withContext(Dispatchers.IO) { ProcessCameraProvider.getInstance(ctx).get() }
-            val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
-            val recorder = Recorder.Builder().setQualitySelector(
-                QualitySelector.from(quality, FallbackStrategy.lowerQualityOrHigherThan(quality))).build()
-            val vc = VideoCapture.withOutput(recorder)
-            provider.unbindAll()
-            provider.bindToLifecycle(lifecycleOwner,
-                if (front) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA,
-                preview, vc)
-            videoCapture = vc
-        } catch (e: Exception) { msg = "कैमरा शुरू नहीं हो सका: ${e.message}" }
-    }
-
-    Column(Modifier.fillMaxSize()) {
-        AndroidView({ previewView }, Modifier.weight(1f).fillMaxWidth())
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(CamQuality.HD to "720p", CamQuality.FHD to "1080p", CamQuality.UHD to "4K").forEach { (q, label) ->
-                    FilterChip(quality == q, onClick = { if (recording == null) quality = q },
-                        label = { Text(label) })
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(enabled = recording == null, onClick = { front = !front }) {
-                    Text(if (front) "पीछे का कैमरा" else "सेल्फ़ी कैमरा") }
-                Button(onClick = {
-                    val rec = recording
-                    if (rec != null) { rec.stop(); recording = null; return@Button }
-                    val vc = videoCapture ?: return@Button
-                    val values = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, "PrakashAI_clip_${System.currentTimeMillis()}")
-                        put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
-                        put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/PrakashAIStudio")
-                    }
-                    val opts = MediaStoreOutputOptions.Builder(ctx.contentResolver,
-                        MediaStore.Video.Media.EXTERNAL_CONTENT_URI).setContentValues(values).build()
-                    @Suppress("MissingPermission")
-                    recording = vc.output.prepareRecording(ctx, opts).withAudioEnabled()
-                        .start(ContextCompat.getMainExecutor(ctx)) { ev ->
-                            if (ev is VideoRecordEvent.Finalize) {
-                                if (ev.hasError()) msg = "रिकॉर्डिंग त्रुटि: कोड ${ev.error}"
-                                else { clipCount++; msg = "क्लिप $clipCount गैलरी में सेव हुई" }
-                            }
-                        }
-                }) { Text(if (recording != null) "रोकें" else "रिकॉर्ड करें") }
-            }
-            Text("रिकॉर्ड की गई क्लिप: $clipCount")
-            if (msg.isNotEmpty()) Text(msg)
-        }
-    }
-}
-
-// ============================================================
-// माय प्रोजेक्ट्स
-// ============================================================
-@Composable
-fun ProjectsPage() {
     val ctx = LocalContext.current
     val dao = remember { AppDb.get(ctx).projects() }
     val projects by dao.all().collectAsState(initial = emptyList())
-    val scope = rememberCoroutineScope()
 
-    Column(Modifier.padding(16.dp)) {
-        Text("मेरे प्रोजेक्ट: ${projects.size}")
-        if (projects.isEmpty()) Text("अभी कोई प्रोजेक्ट सेव नहीं है।")
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(projects) { p ->
-                Card(Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(12.dp).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Column {
-                            Text(p.name)
-                            Text(DateFormat.getDateTimeInstance().format(Date(p.createdAt)),
-                                style = MaterialTheme.typography.bodySmall)
-                        }
-                        TextButton(onClick = { scope.launch(Dispatchers.IO) { dao.delete(p) } }) { Text("हटाएँ") }
+    Column(Modifier.fillMaxSize().background(Bg).verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)) {
+
+        Box(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp))
+                .background(Brush.linearGradient(listOf(Accent, Accent2))).padding(24.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Prakash AI Studio", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text("Create, edit and share videos", fontSize = 14.sp, color = Color.White)
+                Button(
+                    onClick = { pendingTarget = null; go("Video Editor") },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFF1E1B4B))
+                ) {
+                    Icon(Icons.Default.Add, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("New Project", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        Text("Start a project", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            PresetCard("YouTube", "16:9", Icons.Default.PlayCircle, Color(0xFFEF4444), Modifier.weight(1f)) {
+                pendingTarget = Target.FACEBOOK; go("Video Editor")
+            }
+            PresetCard("Shorts", "9:16", Icons.Default.PhoneAndroid, Color(0xFFF59E0B), Modifier.weight(1f)) {
+                pendingTarget = Target.SHORTS; go("Video Editor")
+            }
+            PresetCard("Reels", "9:16", Icons.Default.CameraAlt, Color(0xFFEC4899), Modifier.weight(1f)) {
+                pendingTarget = Target.REELS; go("Video Editor")
+            }
+        }
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
+            Text("Recent projects", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+            TextButton(onClick = { go("My Projects") }) { Text("See all") }
+        }
+        if (projects.isEmpty()) {
+            Text("No projects yet. Tap New Project to start.", color = Muted, fontSize = 13.sp)
+        } else {
+            projects.take(3).forEach { p ->
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Surface1)
+                        .clickable { go("My Projects") }.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        Modifier.size(44.dp).clip(RoundedCornerShape(12.dp))
+                            .background(Brush.linearGradient(listOf(Accent, Accent2))),
+                        contentAlignment = Alignment.Center
+                    ) { Icon(Icons.Default.Movie, null, tint = Color.White) }
+                    Column {
+                        Text(p.name, fontSize = 14.sp, maxLines = 1)
+                        Text(DateFormat.getDateTimeInstance().format(Date(p.createdAt)),
+                            fontSize = 11.sp, color = Muted)
                     }
                 }
             }
         }
-    }
-}
 
-// ============================================================
-// गैलरी
-// ============================================================
-private fun listExports(ctx: Context): List<File> =
-    SaveShare.exportsDir(ctx).listFiles { f -> f.extension == "mp4" }
-        ?.sortedByDescending { it.lastModified() } ?: emptyList()
-
-@Composable
-fun GalleryPage() {
-    val ctx = LocalContext.current
-    var files by remember { mutableStateOf(listExports(ctx)) }
-    var msg by remember { mutableStateOf("") }
-
-    Column(Modifier.padding(16.dp)) {
-        Text("एक्सपोर्ट किए वीडियो: ${files.size}")
-        if (msg.isNotEmpty()) Text(msg)
-        if (files.isEmpty()) Text("अभी कोई एक्सपोर्ट नहीं है। किसी एडिटर से वीडियो बनाइए।")
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(files) { f ->
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(f.name)
-                        Text("${f.length() / 1024 / 1024} MB  •  " +
-                            DateFormat.getDateTimeInstance().format(Date(f.lastModified())),
-                            style = MaterialTheme.typography.bodySmall)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = {
-                                msg = SaveShare.saveToGallery(ctx, f).fold(
-                                    { "गैलरी में सेव हो गया" }, { "सेव नहीं हुआ: ${it.message}" })
-                            }) { Text("गैलरी में सेव") }
-                            OutlinedButton(onClick = { SaveShare.share(ctx, f) }) { Text("शेयर") }
-                            TextButton(onClick = {
-                                if (f.delete()) { files = listExports(ctx); msg = "हटाया गया" }
-                                else msg = "फ़ाइल हटाई नहीं जा सकी"
-                            }) { Text("हटाएँ") }
+        Text("Tools", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+        features.chunked(2).forEachIndexed { row, pair ->
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                pair.forEachIndexed { col, f ->
+                    var shown by remember { mutableStateOf(false) }
+                    LaunchedEffect(Unit) { kotlinx.coroutines.delay((row * 2 + col) * 80L); shown = true }
+                    AnimatedVisibility(shown, modifier = Modifier.weight(1f),
+                        enter = fadeIn() + slideInVertically { it / 2 }) {
+                        Column(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp))
+                                .background(Surface1).clickable { go(f.route) }.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                Modifier.size(46.dp).clip(CircleShape)
+                                    .background(Brush.linearGradient(listOf(f.c1, f.c2))),
+                                contentAlignment = Alignment.Center
+                            ) { Icon(f.icon, null, tint = Color.White, modifier = Modifier.size(24.dp)) }
+                            Text(f.title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                            Text(f.sub, fontSize = 12.sp, color = Muted)
                         }
                     }
                 }
             }
         }
+        Spacer(Modifier.height(8.dp))
     }
 }
 
-// ============================================================
-// सेटिंग्स
-// ============================================================
 @Composable
-fun SettingsPage() {
-    val ctx = LocalContext.current
-    var msg by remember { mutableStateOf("") }
-    val dir = SaveShare.exportsDir(ctx)
-    val used = dir.listFiles()?.sumOf { it.length() }?.div(1024 * 1024) ?: 0
-
-    Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Prakash AI Studio v1.0", style = MaterialTheme.typography.titleMedium)
-        Text("एक्सपोर्ट फ़ोल्डर का उपयोग: $used MB")
-        Button(onClick = {
-            val n = dir.listFiles()?.count { it.delete() } ?: 0
-            msg = "$n फ़ाइलें हटाईं"
-        }) { Text("एक्सपोर्ट फ़ाइलें साफ़ करें") }
-        if (msg.isNotEmpty()) Text(msg)
-        HorizontalDivider()
-        Text("ऑन-डिवाइस और मुफ़्त (इस संस्करण में):", style = MaterialTheme.typography.titleSmall)
-        Text("• ट्रिम, स्पीड, चमक, कॉन्ट्रास्ट, रंग, फ़िल्टर\n• Shorts/Reels/Facebook फ़ॉर्मेट, 720p/1080p/4K\n• कैमरा रिकॉर्डिंग\n• कई क्लिप जोड़कर एक वीडियो, म्यूज़िक के साथ\n• गैलरी में सेव और शेयर")
-        Text("अभी जुड़ना बाकी:", style = MaterialTheme.typography.titleSmall)
-        Text("• सबटाइटल, शोर हटाना, ऑटो-ज़ूम\n• सबसे अच्छे हिस्से ढूँढना (Shorts)\n• टेक्स्ट और स्टिकर")
-        Text("बाहरी AI सेवा चाहिए:", style = MaterialTheme.typography.titleSmall)
-        Text("• सीन का अर्थ समझकर सबसे दिलचस्प हिस्सा चुनना\n• चेहरे के पीछे चलने वाला ज़ूम\n• बहुत सटीक हिंदी सबटाइटल")
+fun PresetCard(
+    title: String, sub: String, icon: ImageVector, color: Color,
+    modifier: Modifier, onClick: () -> Unit
+) {
+    Column(
+        modifier.clip(RoundedCornerShape(18.dp)).background(Surface1)
+            .clickable(onClick = onClick).padding(vertical = 14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Icon(icon, null, tint = color, modifier = Modifier.size(28.dp))
+        Text(title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        Text(sub, fontSize = 11.sp, color = Muted)
     }
 }
+
+// ===== END OF PART 1: now paste PART 2 directly below this line =====
